@@ -1,0 +1,49 @@
+# IDE
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.pyo
+
+# Checkpoints / models
+checkpoints*/
+generated*/
+split_info*/
+
+# Offset data (large .npy files)
+offsets*/
+
+# CNN trained models
+cnn_classifier*/cnn_best*.pt
+cnn_classifier*/cnn_best*.json
+
+# mmWave
+mmwave raw data/
+mmWave_data_proc*/
+mmWave_data/
+mmWave data/
+mmWave data_v*/
+
+# WiFi
+WiFi data_pad_v4/
+generated_rf-diffusion*/
+generated_wixup*/
+generated_unseen_v4/
+
+# Ultrasound
+ultrasound raw data/
+ultrasound data_split/
+ultrasound data_proc*/
+offsets_ultrasound*/
+generated_ultrasound*/
+checkpoints_ultrasound*/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Packaged lightweight demo artifacts
+!demo/
+!demo/**
