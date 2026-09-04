@@ -1,8 +1,6 @@
 # SenseGen
 
-SenseGen is a virtual data generation tool for wireless HCI applications, with examples for WiFi CSI spectrograms, mmWave range-Doppler heatmaps, and ultrasound spectrograms. The project combines behavioral offset extraction, Siamese offset filtering, an offset-conditioned diffusion model, and few-shot CNN evaluation.
-
-The system targets few-shot sensing scenarios where only a small number of samples are available for customized unseen classes.
+SenseGen is a virtual data generation tool for wireless HCI applications. The project combines behavioral offset extraction, Siamese offset filtering, an offset-conditioned diffusion model, and few-shot CNN evaluation.
 
 The deployment of SenseGen consists of two stages: generative model construction and virtual sample generation.
 
