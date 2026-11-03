@@ -2,7 +2,7 @@
 
 SenseGen generates synthetic sensing samples for wireless human-computer interaction (HCI). Given a small set of real examples from a gesture or activity class, it uses behavioral variations learned from base classes to produce additional samples for downstream classifier training.
 
-The project supports WiFi, millimeter-wave (mmWave), and ultrasound data through a shared workflow. It provides scripts for preparing `.npy` arrays, extracting and screening behavioral offsets, training a diffusion model, generating samples, and evaluating their use in a few-shot CNN classifier. The `demo/` directory includes a small set of examples and a checkpoint for each modality.
+The project supports WiFi, millimeter-wave (mmWave), and ultrasound data through a shared workflow. It provides scripts for preparing `.npy` arrays, extracting and screening behavioral offsets, training a diffusion model, generating samples, and evaluating their use in a CNN classifier. The `demo/` directory includes a small set of examples and a checkpoint for each modality.
 
 ## How It Works
 
@@ -19,7 +19,7 @@ Static offsets capture slowly varying differences between paired signals; dynami
 
 The workflow figure summarizes one-time model construction from base classes and few-shot generation for unseen classes.
 
-## Representative Generated Samples
+## Generated Samples
 
 The following examples compare real and generated samples across three sensing modalities. Each image shows a real sample on the left and a generated sample on the right.
 
@@ -521,4 +521,4 @@ generated_WiFi/
 split_info_wifi/
 ```
 
-The matching mmWave and ultrasound outputs use the same naming pattern with modality-specific names. These outputs are ignored by `.gitignore`.
+The matching mmWave and ultrasound outputs use the same naming pattern with modality-specific names. 
