@@ -1,18 +1,47 @@
 # SenseGen
 
-SenseGen is a virtual data generation tool for wireless HCI applications. The project combines behavioral offset extraction, Siamese offset filtering, an offset-conditioned diffusion model, and few-shot CNN evaluation.
+SenseGen generates synthetic sensing samples for wireless human-computer interaction (HCI). Given a small set of real examples from a gesture or activity class, it uses behavioral variations learned from base classes to produce additional samples for downstream classifier training.
 
-The deployment of SenseGen consists of two stages: generative model construction and virtual sample generation.
+The project supports WiFi, millimeter-wave (mmWave), and ultrasound data through a shared workflow. It provides scripts for preparing `.npy` arrays, extracting and screening behavioral offsets, training a diffusion model, generating samples, and evaluating their use in a few-shot CNN classifier. The `demo/` directory includes a small set of examples and a checkpoint for each modality.
 
-During generative model construction, users first define a set of common task categories, such as gestures or activities, referred to as base classes, and collect sufficient real samples for each class. Notably, data from the base classes only needs to be collected once and can be reused to generate samples for different unseen tasks. The collected samples undergo necessary preprocessing, such as denoising and STFT. Within each base class, real samples are then paired to extract two complementary behavioral offsets, namely the static offset and dynamic offset. The paired samples and their corresponding offsets are subsequently used to train a generative model.
+## How It Works
 
-During virtual sample generation, users can define customized task categories based on application requirements, referred to as unseen classes. Only a few real samples, for example three samples, need to be collected for each unseen class, and these samples undergo the same preprocessing as in the generative model construction stage. A Siamese network is then employed to measure the similarity between the behavioral offsets of unseen-class samples and those extracted from the base classes. Based on these similarities, SenseGen selects base-class offsets that provide both transferability and diversity. Guided by the selected offsets, SenseGen generates a large number of high-fidelity and diverse virtual samples for the unseen classes. These virtual samples can then be combined with the limited real samples and fed into downstream sensing models, such as gesture classifiers, to improve sensing performance while substantially reducing data collection costs.
+SenseGen separates its workflow into two stages:
 
-This repository provides a single default diffusion implementation shared by WiFi, mmWave, and ultrasound.
+1. **Model construction:** Prepare samples from base classes, extract static and dynamic offsets between pairs of samples, and train the offset-conditioned diffusion model.
+2. **Sample generation:** Prepare a few real samples from an unseen class, screen the reusable base-class offsets, and use selected offsets to generate additional samples. A CNN can then be trained with real samples and optionally the generated samples.
+
+Static offsets capture slowly varying differences between paired signals; dynamic offsets capture the remaining faster variations. The trained generator reuses these patterns for unseen classes without class-specific retraining.
+
+## Workflow
+
+![SenseGen workflow](assets/workflow.png)
+
+The workflow figure summarizes one-time model construction from base classes and few-shot generation for unseen classes.
+
+## Representative Generated Samples
+
+The following examples compare real and generated samples across three sensing modalities. Each image shows a real sample on the left and a generated sample on the right.
+
+| WiFi | mmWave | Ultrasound |
+|:--:|:--:|:--:|
+| ![Real and generated WiFi sample](assets/gen_wifi.png) | ![Real and generated mmWave sample](assets/gen_mmWave.png) | ![Real and generated ultrasound sample](assets/gen_ultrasound.png) |
+
+## Evaluation Results
+
+With three real support samples per unseen class, the reported downstream recognition results are:
+
+| Modality | 3-shot recognition accuracy | Improvement over real-only baseline |
+|:----------:|:----------------------------:|:------------------------------------:|
+| WiFi | 91.3% | +8.4 percentage points |
+| mmWave | 85.8% | +15.1 percentage points |
+| Ultrasound | 81.6% | +19.4 percentage points |
+
+The evaluation used 20 generated samples per support sample, giving 60 virtual samples per unseen class. Results were averaged over ten trials with randomly selected support samples and across subjects. These are published benchmark results; the packaged demo exercises generation and does not reproduce the benchmark.
 
 ## System Overview
 
-SenseGen treats each sensing sample as a two-dimensional representation. Depending on the modality, this representation may be a CSI spectrogram, a range-Doppler heatmap, or an ultrasound spectrogram. All modules consume the same directory convention and `.npy` sample format, which keeps the implementation consistent across modalities.
+SenseGen treats each sensing sample as a two-dimensional representation: a CSI-derived spectrogram, a processed mmWave heatmap, or an ultrasound spectrogram. The modules share a directory convention and `.npy` sample format, with modality-specific shapes.
 
 At the implementation level, the pipeline passes data through a small set of reusable artifacts: preprocessed samples, base-class offset pools, few-shot unseen split files, Siamese-filtered offset indexes, diffusion checkpoints, generated samples, and CNN evaluation outputs. Each artifact is stored on disk with explicit paths, so stages can be inspected or rerun independently.
 
@@ -20,15 +49,17 @@ At the implementation level, the pipeline passes data through a small set of reu
 
 ### Preprocessing
 
-`model code/preprocess.py` converts raw modality-specific files into normalized `.npy` arrays with consistent shapes. The preprocessing stage is intentionally thin: it prepares data layout, shape, and numeric format so the later offset and diffusion code can operate through a shared interface.
+`model code/preprocess.py` accepts modality-specific `.npy` arrays and prepares shapes and numeric formats for the later stages. WiFi and ultrasound inputs must already be spectrograms; this script does not perform acquisition, raw-signal denoising, or STFT. These upstream preparation steps must be completed before using the script.
 
-For WiFi and ultrasound, samples are represented as spectrogram-like arrays. For mmWave, samples are represented as range-Doppler heatmaps. The script exposes a unified `--signal_type` argument while preserving modality-specific shape handling.
+WiFi and ultrasound arrays are zero-padded to the target shape. mmWave arrays undergo averaging, frame removal, a log transform, and normalization. The script exposes a unified `--signal_type` argument; the input and output shapes are listed under **Expected Shapes**.
 
 ### Offset Extraction
 
 `model code/extract_offset.py` builds static and dynamic offset pools from within-class sample pairs. These offsets are the main bridge between observed base-class motion patterns and unseen-class generation. The same script also creates and reuses few-shot split files, so the support samples used for unseen-query offsets can stay aligned with later generation and evaluation.
 
 The offset directory is organized by offset type, source, and class. This makes it possible to filter offsets per unseen class without copying large arrays when JSON indexes are used.
+
+For each pair, the implementation computes an element-wise sample difference, extracts its smooth static component with a Savitzky-Golay filter, and uses the residual as the dynamic component.
 
 ### Siamese Offset Filtering
 
@@ -44,7 +75,7 @@ The filtering stage compares base-class offsets with few-shot unseen-query offse
 
 ### Diffusion Generation
 
-`model code/diffusion/` contains the default generator used by the project. The model is an offset-conditioned diffusion pipeline with residual offset gating and optional bottleneck cross-attention. The training script learns from base-class samples and base offsets; the sampling script transfers filtered offsets to unseen-class support samples.
+`model code/diffusion/` contains the default generator used by the project. Its defaults enable residual offset gating, bottleneck cross-attention, and dynamic-offset modulation of the timestep embedding. The training script learns from base-class samples and base offsets; the sampling script uses selected offsets with unseen-class support samples.
 
 Key files:
 
@@ -57,13 +88,13 @@ Key files:
 | `train.py` | Training entry point |
 | `sample.py` | Unseen-class generation entry point |
 
-The sampling code uses DDPM sampling. SDEdit-style generation is available through `--sdedit_t`.
+The sampling code uses DDPM sampling. A positive `--sdedit_t` enables SDEdit-style generation anchored to a real support sample, as in the commands below. Omitting it starts sampling from noise.
 
 ### CNN Evaluation
 
 `cnn_classifier/` provides the downstream few-shot evaluation protocol. `cnn_eval_unseen.py` trains and evaluates a small CNN on real few-shot unseen samples, then optionally augments the support set with generated samples. This stage is not part of the generator itself; it is included to provide a consistent way to check whether generated samples are useful for classifier training.
 
-For multi-trial evaluation, omitting `--seed` lets each trial use an automatically incremented seed. Passing `--seed` fixes the seed across all trials.
+For multi-trial evaluation, omitting `--seed` lets each trial use an automatically incremented seed. Passing `--seed` fixes the seed across all trials. Saved split files take precedence over random support selection, so changing the trial seed does not resample a saved support/evaluation split.
 
 ## Repository Layout
 
@@ -71,6 +102,11 @@ For multi-trial evaluation, omitting `--seed` lets each trial use an automatical
 SenseGen/
 |-- README.md
 |-- requirements.txt
+|-- assets/
+|   |-- workflow.png
+|   |-- gen_wifi.png
+|   |-- gen_mmWave.png
+|   +-- gen_ultrasound.png
 |-- demo/
 |   |-- WiFi/
 |   |-- mmWave/
@@ -107,21 +143,35 @@ Note that `model code` contains a space, so quote paths that point into it.
 
 ## Installation
 
-Python 3.9 or newer is recommended.
+Use Python 3.9 or newer with compatible builds of the packages in `requirements.txt`. Run the following commands from the repository root.
+
+Linux/macOS or a Bash environment:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-If you use CUDA, install the PyTorch build that matches your CUDA driver and hardware. The default `pip install -r requirements.txt` may install a CPU build depending on your environment.
+Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+For CUDA, install a compatible CUDA-enabled PyTorch build in the environment. Use `--device cpu` for CPU execution; diffusion sampling on CPU can be slow. The requirements specify minimum versions rather than a pinned environment, so record the Python and package versions used for experiments.
+
+The multi-line demo and manual commands below use Bash continuation syntax (`\`). In PowerShell, put each command on one line or replace the continuation characters with backticks. The `.ps1` runners shown below already use PowerShell syntax.
 
 ## Packaged Demo
 
 The `demo/` directory contains one compact generation example per modality: a trained diffusion checkpoint, a small base offset pool, and a small unseen sample set. It is intended to verify the generation path and file conventions, not to report classification accuracy or reproduce full benchmark numbers.
 
-The packaged checkpoints are lightweight demo artifacts. The commands below use `--sdedit_t 100` for faster local verification.
+The packaged checkpoints are lightweight demo artifacts. The commands below use `--sdedit_t 100` for a shorter sampling run. Each modality's demo contains one base class and one unseen class; CNN unseen evaluation requires at least two unseen classes and additional real data.
+
+Use checkpoints from trusted sources: the current checkpoint loader deserializes Python objects as well as model weights.
 
 Current demo contents:
 
@@ -170,11 +220,13 @@ python "model code/diffusion/sample.py" \
 
 ## Expected Shapes
 
-| Modality | Preprocessed shape |
-|----------|--------------------|
-| WiFi | `(64, 256)` |
-| mmWave | `(16, 128)` |
-| Ultrasound | `(256, 256)` |
+| Modality | Input to `preprocess.py` | Output shape | Processing |
+|----------|--------------------------|--------------|------------|
+| WiFi | `(61, 250)` spectrogram | `(64, 256)` | Zero-padding |
+| mmWave | `(1, 17, 256, 128)` array | `(16, 128)` | Averaging, frame removal, log transform, z-score normalization |
+| Ultrasound | `(224, 224)` spectrogram | `(256, 256)` | Zero-padding; input normalization is preserved |
+
+The demo data is already preprocessed and can be passed directly to `sample.py`. Do not run it through `preprocess.py` again. For mmWave experiments, use `--splits base unseen --shared_stats` so unseen data is normalized with statistics computed from the base split.
 
 ## Supported Modalities
 
@@ -184,11 +236,17 @@ WiFi samples are handled as CSI-derived spectrograms. The default shape is compa
 
 ### mmWave
 
-mmWave samples are handled as range-Doppler heatmaps. Their smaller spatial shape reflects the representation used by the preprocessed radar data. The mmWave workflow follows the same offset, diffusion, and CNN evaluation stages as WiFi, with modality-specific defaults for source names, batch sizes, and paths.
+mmWave samples are reduced to two-dimensional heatmaps by the preprocessing script. The mmWave workflow follows the same offset, diffusion, and CNN evaluation stages as WiFi, with modality-specific defaults for source names, batch sizes, and paths.
 
 ### Ultrasound
 
 Ultrasound samples are handled as higher-resolution spectrograms. Because the default shape is larger, ultrasound diffusion training usually needs a smaller batch size than WiFi or mmWave. Ultrasound examples use letter-style class names such as `A` and `F`.
+
+## Data Availability
+
+The repository includes compact examples under `demo/`; it does not include the complete training and evaluation datasets or the full preprocessing chain from raw sensor recordings. The full pipeline runners require separately prepared base-class and unseen-class data in the formats below.
+
+To use your own data, organize the prepared arrays as shown below and adjust the source names and class directories in the commands. The reported evaluation used a collected WiFi gesture dataset, mmWave data from **XRF55**, and an ultrasound gesture dataset used in **PreGesNet**. The full datasets are not included in this repository.
 
 ## Data Layout
 
@@ -242,13 +300,15 @@ ultrasound data_split/
 
 Bash runners in `scripts/` encode the default end-to-end workflows. Windows PowerShell equivalents are also provided in the same directory. They are intended as reproducible starting points and can be edited for your dataset paths, class lists, or GPU memory budget.
 
+Run them from the repository root after preparing the full input datasets. They train models as well as generate data, and are not shortcuts for running the compact demo. Check each Python stage's exit status and expected outputs before continuing if a PowerShell runner reports a failure.
+
 ```bash
 bash ./scripts/run_pipeline_wifi.sh
 bash ./scripts/run_pipeline_mmwave.sh
 bash ./scripts/run_pipeline_ultrasound.sh
 ```
 
-Each runner accepts:
+The Bash runners accept:
 
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
@@ -268,11 +328,19 @@ Windows PowerShell example:
 .\scripts\run_pipeline_wifi.ps1 -Device cuda -Source volunteer_0 -Seed 42
 ```
 
-The runners use compact split directories such as `split_info_wifi`, so generated samples and evaluation reuse exactly the same support/eval split.
+The runners use split directories such as `split_info_wifi`, so offset screening, generation, and evaluation reuse the same support/evaluation split. All current runners use a screening interval of `[0.65, 0.95]`; this differs from the modality-specific intervals used in the reported evaluation:
+
+| Modality | Reported evaluation interval | Current runner interval |
+|----------|--------------------------|-------------------------|
+| WiFi | `[0.80, 0.99]` | `[0.65, 0.95]` |
+| mmWave | `[0.70, 0.95]` | `[0.65, 0.95]` |
+| Ultrasound | `[0.60, 0.95]` | `[0.65, 0.95]` |
+
+Choose and record the interval used for your experiment. The manual WiFi example below uses the reported WiFi interval.
 
 ## Manual Workflow
 
-The same workflow can be run manually stage by stage. The examples below use WiFi paths; replace `--signal_type`, paths, and source names for mmWave or ultrasound.
+The same workflow can be run manually stage by stage. The examples below use WiFi paths. For mmWave or ultrasound, also adapt the preprocessing flags, Savitzky-Golay parameters, screening interval, and batch sizes shown in their runners; changing only the paths and `--signal_type` is insufficient.
 
 ### 1. Preprocess
 
@@ -309,6 +377,8 @@ python "model code/extract_offset.py" \
     --sg_window 51 --sg_order 3 --sg_axis 1 \
     --seed 42 --force_split
 ```
+
+`--force_split` replaces saved support/evaluation assignments. If those assignments change, rerun offset screening and sample generation before evaluating again.
 
 ### 4. Train Siamese Offset Similarity Model
 
@@ -396,6 +466,10 @@ python "cnn_classifier/cnn_eval_unseen.py" \
 ```
 
 If `--seed` is omitted in multi-trial CNN unseen evaluation, trials use auto-incremented seeds starting from 42. If `--seed N` is provided, every trial uses the same seed `N`.
+
+With saved split files, `--trials 10` repeats classifier training on the same support/evaluation assignments. To repeat evaluation with independently selected support samples, create a separate split for each trial and rerun unseen-offset extraction, screening, generation, and evaluation for that split. Keep those artifacts in separate directories.
+
+The current CNN evaluation script selects the best epoch and applies early stopping using the reported evaluation set. It does not implement a separate validation/test split. Independent final-test reporting requires adapting the evaluation code to select checkpoints on a validation set first.
 
 ## Modality Defaults
 
